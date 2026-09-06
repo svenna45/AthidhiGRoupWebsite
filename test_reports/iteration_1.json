@@ -1,0 +1,54 @@
+{
+  "summary": "Tested new CMS feature. Backend: 7/7 pytest tests pass (create/list/update/delete, slug uniqueness, invalid-id 404, and sources/collections hides cms_content and gh_settings). Frontend: full CMS CRUD flow via UI verified — create (title/type/status/body + auto slug shown as content/<slug>.md), edit, delete; selection wiring increments selection-count and Content tab counter; Workspace tab renders without the previous FileTree recursion crash. Did NOT test GitHub connect/preview/push (no PAT).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Global (dev overlay)",
+        "issue": "React dev-mode 'Uncaught runtime errors: ResizeObserver loop completed with undelivered notifications' overlay is shown on top of the app, obscuring UI and intercepting clicks in Playwright. This is a benign warning from Radix/shadcn components (dialog/select) but the CRA/react-error-overlay elevates it to a full-screen error. Consider swallowing this specific ResizeObserver warning in index.js (window.addEventListener('error', ...)) to prevent the overlay in dev.",
+        "selector": "body > div (react-error-overlay)",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "CmsTab / SourcePicker DialogContent",
+        "issue": "Radix warning: 'Missing Description or aria-describedby={undefined} for DialogContent'. Add a DialogDescription (or aria-describedby) for a11y and to remove the warning.",
+        "selector": "[data-testid=\"cms-editor-dialog\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cms.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Suppress benign ResizeObserver error in dev to prevent full-screen error overlay from covering the app (e.g., in index.js: window.addEventListener('error', e => { if (e.message.includes('ResizeObserver loop')) e.stopImmediatePropagation(); }); ). It does not affect prod builds but degrades dev UX.",
+    "OPTIONAL: Add DialogDescription/aria-describedby to the CMS editor Dialog for a11y."
+  ],
+  "critical_code_review_comments": [
+    "server.py cms_create: response returns the doc via doc.model_dump() which is fine; DB read-after-write on the preview infra can be race-y under heavy parallel load — mitigated in tests via scope-limited teardown fixtures.",
+    "models.CmsContent.to_mongo(): calling model_dump(by_alias=True, exclude_none=True) with a None `id` correctly excludes _id (verified). Fine as-is.",
+    "server.py cms endpoints do not have rate limiting or size caps on body length beyond CmsContentIn defaults; consider adding a max_length on body (e.g., 200_000).",
+    "sources.HIDDEN_COLLECTIONS correctly hides both gh_settings and cms_content from /api/sources/collections — verified.",
+    "CmsTab.jsx: startEdit assumes c.slug/c.type/c.status/c.body all exist; safe because backend always returns them. Good.",
+    "Test infra note: /app/backend/pytest.ini forces -n 2 --dist loadscope. A module-scoped session fixture that also runs cleanup can wipe TEST_-prefixed data mid-run when another worker teardown fires. Cleanup was moved to a class-scoped fixture in test_cms.py to fix this."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_cms.py (new file)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "100% (CRUD + selection wiring + FileTree render)"
+  },
+  "test_credentials": "N/A (no auth in app; no GitHub PAT used)",
+  "seed_data_creation": "Test items created with TEST_/UI_ prefixes; cleaned up at end of each run. One pre-existing 'Welcome Page' item remained (from earlier smoke testing).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression tests live at /app/backend/tests/test_cms.py — run with `pytest backend/tests/test_cms.py`. Pytest.ini uses -n 2 --dist loadscope; if adding module-scoped fixtures that cleanup shared TEST_-prefixed data, scope the cleanup to the class, not the module, to avoid cross-worker races. When automating UI, the dev-mode react-error-overlay for ResizeObserver may cover the app; dismiss via JS (hide overlay div) before clicking or trigger clicks via element.click() in page.evaluate().",
+  "rca_of_the_issue": "Initial test flakiness (id1 missing from list, slug not unique, PUT returning 404) was NOT a backend bug. Root cause: pytest-xdist loadscope splits classes across two worker processes. My module-scoped `session` fixture had a teardown that deleted every TEST_-prefixed CMS row. gw1 (running the fast TestSourcesCollections test) finished first, and its module-scope teardown wiped the TEST_ records that gw0 was still using in TestCmsCrud. Fix: cleanup moved to a class-scoped fixture (cms_cleanup) bound only to TestCmsCrud. All 7 tests pass consistently after this change."
+}
